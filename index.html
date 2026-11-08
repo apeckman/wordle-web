@@ -23,7 +23,7 @@ from pathlib import Path
 # do not rename
 async def custom_site():
     import embed
-    platform.document.body.style.background = "#7f7f7f"
+    platform.document.body.style.background = "#151924"
 
     platform.window.transfer.hidden = true
     platform.window.canvas.style.visibility = "visible"
@@ -210,10 +210,11 @@ function show_infobox() {
 
         #infobox {
             position: fixed; /* center relative to viewport */
-            background: green;
-            color: blue;
+            background: #212636;
+            color: #eceff4;
             font-weight: bold;
-            padding: 12px 24px;
+            border-radius: 12px;
+            padding: 14px 26px;
  /*           display: none; */
             z-index: 999999;
         }
@@ -229,6 +230,7 @@ function show_infobox() {
             width: 100%;
             height: 100%;
             z-index: 5;
+            touch-action: manipulation;
 
             padding: 0;
             margin: 0 auto;
@@ -244,7 +246,12 @@ function show_infobox() {
             font-family: arial;
             margin: 0;
             padding: none;
-            background-color:powderblue;
+            background-color: #151924;
+            /* game controls: no double-tap zoom, text selection or gray tap flash */
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .topright{
@@ -316,7 +323,7 @@ height="720px"
     oncontextmenu="event.preventDefault()" tabindex=1 hidden>
     </canvas>
 
-    <div id="infobox">Loading, please wait ...</div>
+    <div id="infobox">Loading Wordle &amp; Quordle...</div>
 
     <div id=html></div>
 
