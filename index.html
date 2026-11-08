@@ -86,7 +86,7 @@ async def custom_site():
 
 
     def ui_callback(pkg):
-        platform.window.infobox.innerText = f"installing {pkg}"
+        pass  # keep the rotating loading messages instead of "installing <package>"
 
     await shell.source(main, callback=ui_callback)
 
@@ -161,8 +161,34 @@ config = {
     fb_height : "720"
 }
 
+// Loading messages, rotated while the game downloads (stops once the game hides the box).
+const LOADING_LINES = [
+    "Alex is shuffling the letter tiles...",
+    "Alex is hiding today's words...",
+    "Sharpening Alex's pencils...",
+    "Alex is painting the tiles green...",
+    "Teaching the solver Alex's tricks...",
+    "Alex is double-checking the dictionary...",
+]
+let loading_line = Math.floor(Math.random() * LOADING_LINES.length)
+let loading_timer = null
+
+function rotate_loading_line() {
+    if (infobox.style.display === "none") {
+        clearInterval(loading_timer)
+        return
+    }
+    loading_line = (loading_line + 1) % LOADING_LINES.length
+    infobox.innerText = LOADING_LINES[loading_line]
+    show_infobox()
+}
+
 function show_infobox() {
     infobox.style.display = "block";
+    if (loading_timer === null) {
+        infobox.innerText = LOADING_LINES[loading_line]
+        loading_timer = setInterval(rotate_loading_line, 1600)
+    }
 
     // Measure box
     const w = infobox.offsetWidth;
@@ -325,7 +351,7 @@ height="720px"
     oncontextmenu="event.preventDefault()" tabindex=1 hidden>
     </canvas>
 
-    <div id="infobox">Loading Wordle &amp; Quordle...</div>
+    <div id="infobox">Alex is shuffling the letter tiles...</div>
 
     <div id=html></div>
 
