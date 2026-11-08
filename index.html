@@ -190,16 +190,7 @@ function show_infobox() {
         loading_timer = setInterval(rotate_loading_line, 1600)
     }
 
-    // Measure box
-    const w = infobox.offsetWidth;
-    const h = infobox.offsetHeight;
-
-    // Center in viewport
-    const left = (window.innerWidth - w) / 2;
-    const top = (window.innerHeight - h) / 2;
-
-    infobox.style.left = left + "px";
-    infobox.style.top = top + "px";
+    // (centered by CSS; see #infobox)
 }
 
 </script>
@@ -234,8 +225,17 @@ function show_infobox() {
             width: 300px;
         }
 
+        /* pygbag's "Downloading..." bar flashes up for a moment; the loading box is enough */
+        #transfer { display: none !important; }
+
         #infobox {
-            position: fixed; /* center relative to viewport */
+            position: fixed; /* centered by CSS from the first frame, not measured later by JS */
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%);
+            box-sizing: border-box;
+            max-width: calc(100vw - 32px);
+            text-align: center;
             background: #212636;
             color: #eceff4;
             font-weight: bold;
