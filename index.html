@@ -234,7 +234,8 @@ function show_infobox() {
             top: 50% !important;
             transform: translate(-50%, -50%);
             box-sizing: border-box;
-            max-width: calc(100vw - 32px);
+            width: max-content;               /* one line when it fits... */
+            max-width: calc(100vw - 32px);    /* ...wrapping only on very narrow screens */
             text-align: center;
             background: #212636;
             color: #eceff4;
