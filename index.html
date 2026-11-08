@@ -209,6 +209,17 @@ function show_infobox() {
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="theme-color" content="#151924">
+    <script>
+        // The UAT (testing) site runs the same files as prod; label it by its address so it gets its
+        // own tab title, home-screen name and orange icon. Keep in sync with gui.release_label.
+        if (location.pathname.indexOf("-uat/") >= 0 || location.search.replace("?", "").split("&").indexOf("uat=1") >= 0) {
+            document.title = "Wordle UAT";
+            document.querySelector('meta[name="apple-mobile-web-app-title"]').content = "Wordle UAT";
+            document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(function (link) {
+                link.href = "favicon-uat.png";
+            });
+        }
+    </script>
 
     <style>
         #status {
