@@ -460,6 +460,31 @@ function show_infobox() {
             if (text !== null) wordleShareText(text);
         }, true);
 
+        // Sync (sync.py BrowserTransport): the browser's Python has no sockets or threads, so the page
+        // makes the request and keeps the answer, as JSON {status, text}, until the game takes it.
+        // status 0 means it never got there (offline, or no answer within 15 seconds).
+        window.wordleFetchResults = {};
+
+        function wordleFetch(id, url, headers, body) {
+            var stop = window.AbortController ? new AbortController() : null;
+            var timer = setTimeout(function () { if (stop) stop.abort(); }, 15000);
+            fetch(url, { method: "POST", headers: JSON.parse(headers), body: body, cache: "no-store",
+                         credentials: "omit", signal: stop ? stop.signal : undefined })
+                .then(function (r) { return r.text().then(function (t) { return { status: r.status, text: t }; }); })
+                .catch(function () { return { status: 0, text: "" }; })
+                .then(function (answer) {
+                    clearTimeout(timer);
+                    window.wordleFetchResults[id] = JSON.stringify(answer);
+                });
+        }
+
+        function wordleFetchTake(id) {
+            var answer = window.wordleFetchResults[id];
+            if (answer === undefined) return "";
+            delete window.wordleFetchResults[id];
+            return answer;
+        }
+
         // The player's local date for the daily puzzle (gui.local_date), from the phone's own clock.
         function wordleToday() {
             var d = new Date();
