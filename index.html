@@ -593,6 +593,122 @@ function show_infobox() {
         window.addEventListener("online", function () { window.wordleWoke = true; });
         window.addEventListener("focus", function () { window.wordleWoke = true; });  // (a computer: back to this window)
 
+        // Push updates (sync.py nudged): while signed in, listen on the account's own Supabase Realtime
+        // broadcast channel (its random name comes from the server, gui.py publish_push calls
+        // wordlePush) for "something changed" nudges. They hold no game data: the game just syncs at once
+        // (wordleNudgeTake). A plain WebSocket speaking Realtime's protocol (Phoenix channels, JSON v1),
+        // no library. Reconnects by itself (1 s, doubling to 60 s); closes a minute after the page is
+        // hidden (a background tab needn't hold a connection; Safari freezes it anyway) and opens again
+        // when it's back. Each (re)join says "joined", so the game syncs once for anything it missed.
+        window.wordleNudges = [];
+
+        function wordleNudgeTake() {
+            if (!window.wordleNudges.length) return "";
+            var nudges = window.wordleNudges;
+            window.wordleNudges = [];
+            return JSON.stringify(nudges);
+        }
+
+        var wordlePushNow = null;  // {stop()} for the channel being listened to
+
+        function wordlePush(specText) {
+            if (wordlePushNow) wordlePushNow.stop();
+            wordlePushNow = null;
+            var spec = null;
+            try { spec = specText ? JSON.parse(specText) : null; } catch (e) {}
+            if (spec && spec.url && spec.key && spec.topic && window.WebSocket) wordlePushNow = wordlePushListen(spec);
+        }
+
+        function wordlePushListen(spec) {
+            var topic = "realtime:" + spec.topic, socket = null, beat = null, retry = null, idle = null;
+            var wait = 1000, ref = 0, stopped = false;
+            function note(event, from) {
+                window.wordleNudges.push({ event: event, from: from || "" });
+                if (window.wordleNudges.length > 50) window.wordleNudges.splice(0, window.wordleNudges.length - 50);
+            }
+            function send(message) {
+                try { socket.send(JSON.stringify(message)); } catch (e) {}
+            }
+            function close() {
+                clearInterval(beat);
+                beat = null;
+                if (socket) {
+                    var old = socket;
+                    socket = null;
+                    old.onclose = old.onmessage = old.onerror = null;
+                    try { old.close(); } catch (e) {}
+                }
+            }
+            function later() {
+                if (stopped || retry) return;
+                retry = setTimeout(function () { retry = null; open(); }, wait);
+                wait = Math.min(wait * 2, 60000);
+            }
+            function open() {
+                if (stopped || socket || window.wordleInactive || document.visibilityState === "hidden") return;
+                var url = spec.url.replace(/^http/, "ws").replace(/\/+$/, "") + "/realtime/v1/websocket?apikey=" +
+                    encodeURIComponent(spec.key) + "&vsn=1.0.0";
+                try { socket = new WebSocket(url); } catch (e) { socket = null; later(); return; }
+                var mine = socket, join = String(++ref);
+                mine.onopen = function () {
+                    send({ topic: topic, event: "phx_join", ref: join, join_ref: join, payload: { config: {
+                        broadcast: { ack: false, self: false }, presence: { key: "" }, postgres_changes: [],
+                        "private": false } } });
+                    beat = setInterval(function () {
+                        if (window.wordleInactive) { stop(); return; }
+                        send({ topic: "phoenix", event: "heartbeat", payload: {}, ref: String(++ref) });
+                    }, 25000);
+                };
+                mine.onmessage = function (message) {
+                    var m = null;
+                    try { m = JSON.parse(message.data); } catch (e) { return; }
+                    if (!m || m.topic !== topic || window.wordleInactive) return;
+                    if (m.event === "phx_reply" && m.ref === join) {
+                        if (m.payload && m.payload.status === "ok") { wait = 1000; note("joined"); }
+                        else { close(); later(); }  // (turned away: try again later)
+                    } else if (m.event === "broadcast" && m.payload) {
+                        note(String(m.payload.event || ""), String((m.payload.payload || {}).from || ""));
+                    } else if (m.event === "phx_close" || m.event === "phx_error") {
+                        close();
+                        later();
+                    }
+                };
+                mine.onclose = mine.onerror = function () {
+                    if (socket !== mine) return;
+                    close();
+                    later();
+                };
+            }
+            function stop() {
+                stopped = true;
+                clearTimeout(retry);
+                clearTimeout(idle);
+                close();
+                document.removeEventListener("visibilitychange", seen);
+                window.removeEventListener("online", back);
+                window.removeEventListener("pageshow", back);
+            }
+            function seen() {
+                if (document.visibilityState === "hidden") {
+                    clearTimeout(idle);
+                    idle = setTimeout(close, 60000);
+                } else {
+                    clearTimeout(idle);
+                    back();
+                }
+            }
+            function back() {
+                if (stopped) return;
+                wait = 1000;
+                if (!socket) { clearTimeout(retry); retry = null; open(); }
+            }
+            document.addEventListener("visibilitychange", seen);
+            window.addEventListener("online", back);
+            window.addEventListener("pageshow", back);
+            open();
+            return { stop: stop };
+        }
+
         // Sync (sync.py BrowserTransport): the browser's Python has no sockets or threads, so the page
         // makes the request and keeps the answer, as JSON {status, text}, until the game takes it.
         // status 0 means it never got there (offline, or no answer within 15 seconds).
@@ -642,6 +758,10 @@ function show_infobox() {
             if (!wordleAuth || wordleAuth.mode !== spec.mode || wordleAuth.purpose !== spec.purpose) wordleAuthBuild(spec);
             var a = wordleAuth;
             a.error.textContent = spec.error || "";
+            a.error.style.display = spec.error ? "block" : "none";
+            if (a.email && !a.email.readOnly) {
+                a.email.style.borderColor = spec.error && /email/i.test(spec.error) ? "#e5484d" : "#323850";
+            }
             a.note.textContent = spec.note || "";
             a.submit.disabled = !!spec.busy;
             a.submit.textContent = spec.busy ? "One moment..." : a.label;
@@ -681,6 +801,7 @@ function show_infobox() {
             });
             var form = document.createElement("form");
             form.autocomplete = "on";
+            form.noValidate = true;  // (sync.py checks what's typed and says what's wrong in a.error, in red)
             form.style.cssText = "background:#212636;color:#eceff4;border-radius:16px;padding:20px;width:min(88vw,420px);" +
                 "box-sizing:border-box;margin:16px";
             function text(content, css) {
@@ -731,7 +852,9 @@ function show_infobox() {
                 a.code = input("text", "code", "one-time-code", "6-digit code",
                                {inputmode: "numeric", pattern: "[0-9]*", maxlength: "8"});
             }
-            a.error = text("", "color:#ee9664;font-size:14px;margin:6px 0;min-height:0");
+            a.error = text("", "display:none;color:#ff8f8f;background:rgba(229,72,77,0.16);border:1px solid #e5484d;" +
+                           "border-radius:10px;padding:9px 12px;font-size:15px;font-weight:600;margin:8px 0");
+            a.error.setAttribute("role", "alert");
             a.note = text("", "color:#60c891;font-size:14px;margin:6px 0;min-height:0");
             a.submit = document.createElement("button");
             a.submit.type = "submit";
@@ -760,6 +883,10 @@ function show_infobox() {
                 window.wordleAuthEvent = JSON.stringify({action: action, email: a.email ? a.email.value : "",
                     password: a.password ? a.password.value : "", code: a.code ? a.code.value : ""});
             }
+            form.addEventListener("input", function () {  // (fixing it: the red box goes until the next try)
+                a.error.style.display = "none";
+                if (a.email && !a.email.readOnly) a.email.style.borderColor = "#323850";
+            });
             form.addEventListener("submit", function (e) {
                 e.preventDefault();
                 post(actions[mode]);
