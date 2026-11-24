@@ -505,17 +505,19 @@ function show_infobox() {
         var wordleTouchStart = null, wordleTouchHandled = 0, wordleSayStart = null, wordleSayDown = null, wordleSayHandled = 0;
         window.wordleTouchCount = 0;  // every touch the page sees (the ?debug=1 readout compares it with the game's)
         document.addEventListener("touchstart", function () { window.wordleTouchCount++; }, { capture: true, passive: true });
+        // The button and its text are kept from when the finger went down: the game acts on that
+        // (Make a Wordle's Send link then gives the next link a new id, so its text changes before the
+        // finger lifts), and the text shared is the one that was on screen (UAT, Nov 2026).
         document.addEventListener("touchstart", function (event) {
             var touch = event.touches && event.touches[0];
-            wordleTouchStart = touch ? wordleShareAt(touch.clientX, touch.clientY) : null;
+            wordleTouchStart = touch ? wordleTargetHit(window.wordleShareTargets, touch.clientX, touch.clientY) : null;
             wordleSayStart = touch ? wordleTargetHit(window.wordleSayTargets, touch.clientX, touch.clientY) : null;
         }, { capture: true, passive: true });
         document.addEventListener("touchend", function (event) {
             var touch = event.changedTouches && event.changedTouches[0];
-            var text = touch ? wordleShareAt(touch.clientX, touch.clientY) : null;
-            if (text !== null && text === wordleTouchStart) {
+            if (wordleTouchStart && touch && wordleOnTarget(wordleTouchStart, touch.clientX, touch.clientY)) {
                 wordleTouchHandled = Date.now();
-                wordleShareText(text);
+                wordleShareText(wordleTouchStart[4]);
             }
             if (wordleSayStart && touch && wordleOnTarget(wordleSayStart, touch.clientX, touch.clientY)) {
                 wordleSayHandled = Date.now();
@@ -524,8 +526,15 @@ function show_infobox() {
             wordleTouchStart = wordleSayStart = null;
         }, { capture: true, passive: true });
         // Mouse and trackpad.
+        var wordleShareDown = null;  // the Share button the mouse went down on (as for touches above)
+        document.addEventListener("mousedown", function (event) {
+            wordleShareDown = wordleTargetHit(window.wordleShareTargets, event.clientX, event.clientY);
+        }, true);
         document.addEventListener("click", function (event) {
+            var down = wordleShareDown;
+            wordleShareDown = null;
             if (Date.now() - wordleTouchHandled < 1000) return;  // the same tap, already shared
+            if (down && wordleOnTarget(down, event.clientX, event.clientY)) { wordleShareText(down[4]); return; }
             var text = wordleShareAt(event.clientX, event.clientY);
             if (text !== null) wordleShareText(text);
         }, true);
@@ -638,6 +647,71 @@ function show_infobox() {
         window.addEventListener("pageshow", function () { window.wordleWoke = true; });
         window.addEventListener("online", function () { window.wordleWoke = true; });
         window.addEventListener("focus", function () { window.wordleWoke = true; });  // (a computer: back to this window)
+
+        // Each screen's address after the # (gui.py address() / route_step): a reload opens the same
+        // screen, and the browser's Back goes to the screen before. Safari and Chrome skip, on Back,
+        // the entry a page was on when it added one outside a tap, and the game sees taps a frame
+        // late, so this page adds a spare entry during each tap (or key) that may open a screen
+        // (wordleNavTargets / wordleNavKeys, from the game) and the game fills it or steps back off it.
+        // history.state: wordleBelow = JSON list of the game's screens under this entry, wordleSpare.
+        (function () {
+            var taken = null, spareNew = false, navStart = null, navDown = null;
+            window.wordleNavTargets = "";  // JSON [[x, y, width, height, 1 or 2], ...] in canvas pixels
+            window.wordleNavKeys = false;
+            window.wordleNavSeen = 0;  // taps the game has taken in (gui.py publish_nav_targets)
+            window.wordleNavPage = "";  // the kind of page on screen ("menu", "daily", "friend"...)
+            function hash() { return location.hash.replace(/^#/, ""); }
+            function below() {
+                try { return JSON.parse(history.state && history.state.wordleBelow || "[]"); } catch (e) { return []; }
+            }
+            window.wordleRouteState = function () {
+                return JSON.stringify({hash: hash(), below: below(), spare: !!(history.state && history.state.wordleSpare)});
+            };
+            window.wordleRoute = function (how, address, belowJson, steps) {
+                try {
+                    if (how === "go") { history.go(steps); return; }
+                    var url = location.pathname + location.search + (address ? "#" + address : "");
+                    history.replaceState({wordleBelow: String(belowJson || "[]")}, "", url);
+                } catch (e) {}
+            };
+            function addSpare() {
+                if (window.wordleInactive || (history.state && history.state.wordleSpare)) return;
+                try {
+                    var list = below();
+                    list.push(hash());
+                    history.pushState({wordleBelow: JSON.stringify(list.slice(-12)), wordleSpare: true}, "", location.href);
+                    spareNew = true;
+                } catch (e) {}
+            }
+            window.wordleSpareTake = function () { var s = spareNew; spareNew = false; return s; };
+            window.addEventListener("popstate", function () { taken = hash(); });
+            window.wordleRouteTake = function () { var t = taken; taken = null; return t; };
+            function onNav(x, y) {  // (never a Share button: stepping back off a spare closes iOS's share sheet)
+                if (wordleShareAt(x, y) !== null) return null;
+                var t = wordleTargetHit(window.wordleNavTargets, x, y);
+                return t ? {release: t[4] === 2, seen: window.wordleNavSeen, page: window.wordleNavPage} : null;
+            }
+            function lifted(start) {
+                // The finger (or mouse button) lifted after going down on a target: add a spare unless the
+                // game has already taken this tap in and it left the page as it was (a tab, a switch, Hint):
+                // the game would only step back off it, and each history.go made Safari flicker.
+                if (!start) return;
+                if (!start.release && window.wordleNavSeen !== start.seen && window.wordleNavPage === start.page) return;
+                addSpare();  // (the game acts as the finger goes down, so anywhere it lifts)
+            }
+            document.addEventListener("touchstart", function (event) {
+                var touch = event.touches && event.touches[0];
+                navStart = touch ? onNav(touch.clientX, touch.clientY) : null;
+            }, { capture: true, passive: true });
+            document.addEventListener("touchend", function () { lifted(navStart); navStart = null; },
+                                      { capture: true, passive: true });
+            document.addEventListener("mousedown", function (event) { navDown = onNav(event.clientX, event.clientY); }, true);
+            document.addEventListener("mouseup", function () { lifted(navDown); navDown = null; }, true);
+            document.addEventListener("keydown", function (event) {
+                var tag = event.target && event.target.tagName;
+                if (window.wordleNavKeys && tag !== "INPUT" && tag !== "TEXTAREA") addSpare();
+            }, true);
+        })();
 
         // Watchdog (Nov 2026): when the game stops answering, note what it was, for the server's log
         // (gui.py watch() takes the notes every 5 s and sends them; the client_logs query in CLAUDE.md
